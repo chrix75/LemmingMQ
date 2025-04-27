@@ -226,7 +226,7 @@ Configuration for creating a new topic:
 
 Structure representing a message:
 - `ID`: Unique identifier for the message
-- `ContentType`: MIME type of the message content
+- `Topic`: The name of the topic 
 - `Content`: Byte slice containing the message data
 
 ### Functions
@@ -235,9 +235,9 @@ Structure representing a message:
 
 Creates a new topic with the specified configuration.
 
-#### `topic.NewMessage(id int, contentType string, content []byte) Message`
+#### `topic.NewMessage(id int, topic string, content []byte) Message`
 
-Creates a new message with the specified ID, content type, and content.
+Creates a new message with the specified ID, topic name, and content.
 
 ### Methods
 
@@ -245,9 +245,9 @@ Creates a new message with the specified ID, content type, and content.
 
 Registers a new consumer callback function to the topic.
 
-#### `(t *Topic) SendMessage(ctx context.Context, contentType string, content []byte) error`
+#### `(t *Topic) SendMessage(ctx context.Context, content []byte) error`
 
-Sends a message with the specified content type and content to the topic's consumers.
+Sends a message with the specified content to the topic's consumers.
 
 #### `(t *Topic) ConsumerCount() int`
 
