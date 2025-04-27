@@ -1,5 +1,7 @@
 package topic
 
+import "context"
+
 type Message struct {
 	Topic   string
 	Content []byte
@@ -22,4 +24,10 @@ func NewMessage(id int, topic string, content []byte) Message {
 		Topic:   topic,
 		Content: content,
 	}
+}
+
+type ConsumerCallback func(c context.Context, msg Message) error
+
+type MessageHandler interface {
+	Handle(ctx context.Context, msg Message) error
 }

@@ -20,7 +20,8 @@ type Configuration struct {
 
 type Topic struct {
 	Configuration
-	consumers        []ConsumerCallback
+	callbacks        []ConsumerCallback
+	handlers         []MessageHandler
 	dispatcherIndex  int
 	currentMessageID int
 }
@@ -32,10 +33,8 @@ type Topic struct {
 //	topic := NewTopic(Configuration{Name: "example", Diffusion: BroadcastTopic})
 //	count := topic.ConsumerCount() // Returns 0 as no consumers are added yet
 func (t *Topic) ConsumerCount() int {
-	return len(t.consumers)
+	return len(t.callbacks) + len(t.handlers)
 }
-
-type ConsumerCallback func(c context.Context, msg Message) error
 
 // AddConsumer registers a new consumer callback function to the topic.
 //
@@ -47,11 +46,11 @@ type ConsumerCallback func(c context.Context, msg Message) error
 //		return nil
 //	})
 func (t *Topic) AddConsumer(f ConsumerCallback) {
-	t.consumers = append(t.consumers, f)
+	t.callbacks = append(t.callbacks, f)
 }
 
 // SendMessage sends a message with the specified content to the topic's consumers.
-// For BroadcastTopic, the message is sent to all consumers. For DispatchTopic, the message is sent to a single consumer.
+// For BroadcastTopic, the message is sent to allconsumers. For DispatchTopic, the message is sent to a single consumer.
 // It respects context cancellation and returns an error if the context is done or if any consumer fails to process the message.
 //
 // Example:
@@ -94,9 +93,21 @@ func (t *Topic) SendMessage(ctx context.Context, content []byte) error {
 func (t *Topic) sendMessageToAllConsumers(ctx context.Context, msg Message) error {
 	var errs []error
 
-	counters := countersFromConsumers(len(t.consumers), t.Retries)
+	callbackErrs := t.sendMessageToAllCallbacks(ctx, msg)
+	errs = append(errs, callbackErrs...)
 
-	for i, consumer := range t.consumers {
+	handlerErrs := t.sendMessageToAllHandlers(ctx, msg)
+	errs = append(errs, handlerErrs...)
+
+	return errors.Join(errs...)
+}
+
+func (t *Topic) sendMessageToAllHandlers(ctx context.Context, msg Message) []error {
+	var errs []error
+
+	counters := countersFromConsumers(len(t.callbacks), t.Retries)
+
+	for i, consumer := range t.callbacks {
 		err := consumer(ctx, msg)
 
 		for err != nil && counters[i] > 0 {
@@ -109,7 +120,28 @@ func (t *Topic) sendMessageToAllConsumers(ctx context.Context, msg Message) erro
 		}
 	}
 
-	return errors.Join(errs...)
+	return errs
+}
+
+func (t *Topic) sendMessageToAllCallbacks(ctx context.Context, msg Message) []error {
+	var errs []error
+
+	counters := countersFromConsumers(len(t.handlers), t.Retries)
+
+	for i, handler := range t.handlers {
+		err := handler.Handle(ctx, msg)
+
+		for err != nil && counters[i] > 0 {
+			counters[i]--
+			err = handler.Handle(ctx, msg)
+		}
+
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	return errs
 }
 
 func countersFromConsumers(count int, retries int) []int {
@@ -122,34 +154,54 @@ func countersFromConsumers(count int, retries int) []int {
 }
 
 func (t *Topic) dispatchMessage(ctx context.Context, msg Message) error {
-	consumer := t.selectConsumer()
-	if consumer == nil {
+	callback, handler := t.selectConsumer()
+	if callback == nil && handler == nil {
 		return errors.New("could not find a consumer")
 	}
 
 	count := t.Retries
-	err := consumer(ctx, msg)
+	if callback != nil {
+		err := callback(ctx, msg)
+		for err != nil && count > 0 {
+			count--
+			err = callback(ctx, msg)
+		}
+
+		return err
+	}
+
+	err := handler.Handle(ctx, msg)
 	for err != nil && count > 0 {
 		count--
-		err = consumer(ctx, msg)
+		err = handler.Handle(ctx, msg)
 	}
 
 	return err
 }
 
-func (t *Topic) selectConsumer() ConsumerCallback {
-	if len(t.consumers) == 0 {
-		return nil
+func (t *Topic) selectConsumer() (ConsumerCallback, MessageHandler) {
+	if len(t.callbacks) == 0 && len(t.handlers) == 0 {
+		return nil, nil
 	}
 
-	if t.dispatcherIndex >= len(t.consumers) {
+	if t.dispatcherIndex >= len(t.callbacks)+len(t.handlers) {
 		t.dispatcherIndex = 0
 	}
 
-	selected := t.consumers[t.dispatcherIndex]
-	t.dispatcherIndex++
+	if t.dispatcherIndex < len(t.callbacks) {
+		selectedIndex := t.dispatcherIndex
+		t.dispatcherIndex++
+		return t.callbacks[selectedIndex], nil
+	}
 
-	return selected
+	selectedIndex := t.dispatcherIndex - len(t.callbacks)
+	return nil, t.handlers[selectedIndex]
+
+}
+
+// AddMessageHandler registers a new message handler to the topic, appending it to the list of existing handlers.
+func (t *Topic) AddMessageHandler(handler MessageHandler) {
+	t.handlers = append(t.handlers, handler)
 }
 
 // NewTopic creates a new Topic with the provided configuration.

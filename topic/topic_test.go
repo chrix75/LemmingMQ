@@ -71,6 +71,29 @@ func TestAddOneConsumerToBroadcastTopic(t *testing.T) {
 	assert.Equal(t, 1, tp.ConsumerCount())
 }
 
+func TestAddOneMessageHandlerToBroadcastTopic(t *testing.T) {
+	// given
+	tp := NewTopic(Configuration{
+		Name:      "test",
+		Diffusion: BroadcastTopic,
+		Retries:   0,
+	})
+
+	handler := noopHandler{}
+
+	// when
+	tp.AddMessageHandler(handler)
+
+	// then
+	assert.Equal(t, 1, tp.ConsumerCount())
+}
+
+type noopHandler struct{}
+
+func (h noopHandler) Handle(context.Context, Message) error {
+	return nil
+}
+
 func TestTopicBroadCastOneMessage(t *testing.T) {
 	// given
 	ctx := context.Background()
@@ -99,6 +122,61 @@ func TestTopicBroadCastOneMessage(t *testing.T) {
 	// then
 	assert.Nil(t, err)
 	assert.Equal(t, content, receivedContent)
+}
+
+func TestTopicBroadCastOneMessageByHandler(t *testing.T) {
+	// given
+	ctx := context.Background()
+
+	tp := NewTopic(Configuration{
+		Name:      "test",
+		Diffusion: BroadcastTopic,
+		Retries:   0,
+	})
+
+	handler := &stubHandler{}
+
+	tp.AddMessageHandler(handler)
+
+	// when
+	content := "Hello World"
+	err := tp.SendMessage(ctx, []byte(content))
+
+	// then
+	assert.Nil(t, err)
+	assert.Equal(t, []string{content}, handler.receivedContent)
+}
+
+func TestTopicDispatchOneMessageByHandler(t *testing.T) {
+	// given
+	ctx := context.Background()
+
+	tp := NewTopic(Configuration{
+		Name:      "test",
+		Diffusion: DispatchTopic,
+		Retries:   0,
+	})
+
+	handler := &stubHandler{}
+
+	tp.AddMessageHandler(handler)
+
+	// when
+	content := "Hello World"
+	err := tp.SendMessage(ctx, []byte(content))
+
+	// then
+	assert.Nil(t, err)
+	assert.Equal(t, []string{content}, handler.receivedContent)
+}
+
+type stubHandler struct {
+	receivedContent []string
+}
+
+func (h *stubHandler) Handle(_ context.Context, msg Message) error {
+	h.receivedContent = append(h.receivedContent, string(msg.Content))
+	return nil
 }
 
 func TestTopicBroadCastOneMessageToManySubscribers(t *testing.T) {
