@@ -1,9 +1,9 @@
 package lemmingmq
 
 import (
-	"LemmingMQ/topic"
 	"context"
 	"errors"
+	"github.com/chrix75/LemmingMQ/topic"
 	"github.com/stretchr/testify/assert"
 	"sync"
 	"testing"
