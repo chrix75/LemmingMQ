@@ -3,6 +3,7 @@ package topic
 import (
 	"context"
 	"errors"
+	"slices"
 )
 
 type DiffusionType int8
@@ -202,6 +203,13 @@ func (t *Topic) selectConsumer() (ConsumerCallback, MessageHandler) {
 // AddMessageHandler registers a new message handler to the topic, appending it to the list of existing handlers.
 func (t *Topic) AddMessageHandler(handler MessageHandler) {
 	t.handlers = append(t.handlers, handler)
+}
+
+func (t *Topic) RemoveMessageHandler(handler MessageHandler) {
+	handlerIndex := slices.Index(t.handlers, handler)
+	if handlerIndex >= 0 {
+		t.handlers = append(t.handlers[:handlerIndex], t.handlers[handlerIndex+1:]...)
+	}
 }
 
 // NewTopic creates a new Topic with the provided configuration.

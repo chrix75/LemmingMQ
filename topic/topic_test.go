@@ -71,6 +71,25 @@ func TestAddOneConsumerToBroadcastTopic(t *testing.T) {
 	assert.Equal(t, 1, tp.ConsumerCount())
 }
 
+func TestRemoveHandlerConsumerFromTopic(t *testing.T) {
+	// given
+	tp := NewTopic(Configuration{
+		Name:      "test",
+		Diffusion: BroadcastTopic,
+		Retries:   0,
+	})
+
+	handler := noopHandler{}
+	tp.AddMessageHandler(handler)
+
+	// when
+	tp.RemoveMessageHandler(handler)
+
+	// then
+	assert.Equal(t, 0, tp.ConsumerCount())
+
+}
+
 func TestAddOneMessageHandlerToBroadcastTopic(t *testing.T) {
 	// given
 	tp := NewTopic(Configuration{
