@@ -1,4 +1,4 @@
-module LemmingMQ
+module github.com/chrix75/LemmingMQ
 
 go 1.24
 
