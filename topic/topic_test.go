@@ -84,7 +84,7 @@ func TestTopicBroadCastOneMessage(t *testing.T) {
 	var receivedContent string
 
 	tp.AddConsumer(func(ctx context.Context, msg Message) error {
-		if msg.ContentType == "greetings" {
+		if msg.Topic == "test" {
 			receivedContent = string(msg.Content)
 			return nil
 		}
@@ -94,7 +94,7 @@ func TestTopicBroadCastOneMessage(t *testing.T) {
 
 	// when
 	content := "Hello World"
-	err := tp.SendMessage(ctx, "greetings", []byte(content))
+	err := tp.SendMessage(ctx, []byte(content))
 
 	// then
 	assert.Nil(t, err)
@@ -115,7 +115,7 @@ func TestTopicBroadCastOneMessageToManySubscribers(t *testing.T) {
 
 	consumerCallback := func(consumerID int) ConsumerCallback {
 		return func(ctx context.Context, msg Message) error {
-			if msg.ContentType == "greetings" {
+			if msg.Topic == "test" {
 				content := fmt.Sprintf("%d>%s", consumerID, msg.Content)
 				receivedContent = append(receivedContent, content)
 				return nil
@@ -130,7 +130,7 @@ func TestTopicBroadCastOneMessageToManySubscribers(t *testing.T) {
 
 	// when
 	content := "Hello World"
-	err := tp.SendMessage(ctx, "greetings", []byte(content))
+	err := tp.SendMessage(ctx, []byte(content))
 
 	// then
 	assert.Nil(t, err)
@@ -154,7 +154,7 @@ func TestTopicDispatchOneMessageToManySubscribers(t *testing.T) {
 	messageIDs := make([]int, 0)
 
 	consumerCallback := func(ctx context.Context, msg Message) error {
-		if msg.ContentType == "greetings" {
+		if msg.Topic == "test" {
 			receivedContent = append(receivedContent, string(msg.Content))
 			messageIDs = append(messageIDs, msg.ID)
 			return nil
@@ -168,7 +168,7 @@ func TestTopicDispatchOneMessageToManySubscribers(t *testing.T) {
 
 	// when
 	content := "Hello World"
-	err := tp.SendMessage(ctx, "greetings", []byte(content))
+	err := tp.SendMessage(ctx, []byte(content))
 
 	// then
 	assert.Nil(t, err)
@@ -193,7 +193,7 @@ func TestTopicDispatchTwoMessagesToManySubscribers(t *testing.T) {
 
 	consumerCallback := func(consumerID int) ConsumerCallback {
 		return func(ctx context.Context, msg Message) error {
-			if msg.ContentType == "greetings" {
+			if msg.Topic == "test" {
 				content := fmt.Sprintf("%d>%s", consumerID, msg.Content)
 				receivedContent = append(receivedContent, content)
 				messageIDs = append(messageIDs, msg.ID)
@@ -209,12 +209,12 @@ func TestTopicDispatchTwoMessagesToManySubscribers(t *testing.T) {
 
 	// when
 	content := "Hello World"
-	err := tp.SendMessage(ctx, "greetings", []byte(content))
+	err := tp.SendMessage(ctx, []byte(content))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = tp.SendMessage(ctx, "greetings", []byte(content))
+	err = tp.SendMessage(ctx, []byte(content))
 
 	// then
 	assert.Nil(t, err)
@@ -239,7 +239,7 @@ func TestBroadcastWithRetry(t *testing.T) {
 	messageIDs := make([]int, 0)
 
 	consumerCallback := func(ctx context.Context, msg Message) error {
-		if msg.ContentType == "greetings" {
+		if msg.Topic == "test" {
 			receivedContent = append(receivedContent, string(msg.Content))
 			messageIDs = append(messageIDs, msg.ID)
 			return errors.New("simulated error")
@@ -252,7 +252,7 @@ func TestBroadcastWithRetry(t *testing.T) {
 
 	// when
 	content := "Hello World"
-	err := tp.SendMessage(ctx, "greetings", []byte(content))
+	err := tp.SendMessage(ctx, []byte(content))
 
 	// then
 	assert.NotNil(t, err)
@@ -277,7 +277,7 @@ func TestDispatchWithRetry(t *testing.T) {
 	messageIDs := make([]int, 0)
 
 	consumerCallback := func(ctx context.Context, msg Message) error {
-		if msg.ContentType == "greetings" {
+		if msg.Topic == "test" {
 			receivedContent = append(receivedContent, string(msg.Content))
 			messageIDs = append(messageIDs, msg.ID)
 			return errors.New("simulated error")
@@ -290,7 +290,7 @@ func TestDispatchWithRetry(t *testing.T) {
 
 	// when
 	content := "Hello World"
-	err := tp.SendMessage(ctx, "greetings", []byte(content))
+	err := tp.SendMessage(ctx, []byte(content))
 
 	// then
 	assert.NotNil(t, err)
@@ -322,7 +322,7 @@ func TestCancelMessageSending(t *testing.T) {
 	cancel()
 
 	content := "Hello World"
-	err := tp.SendMessage(ctx, "greetings", []byte(content))
+	err := tp.SendMessage(ctx, []byte(content))
 
 	// then
 	assert.NotNil(t, err)

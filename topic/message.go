@@ -1,9 +1,9 @@
 package topic
 
 type Message struct {
-	ContentType string
-	Content     []byte
-	ID          int
+	Topic   string
+	Content []byte
+	ID      int
 }
 
 // NewMessage creates a new Message with the specified ID, content type, and content.
@@ -16,10 +16,10 @@ type Message struct {
 //
 //	// Create a JSON message with ID 2
 //	jsonMsg := NewMessage(2, "application/json", []byte(`{"greeting":"Hello, world!"}`))
-func NewMessage(id int, contentType string, content []byte) Message {
+func NewMessage(id int, topic string, content []byte) Message {
 	return Message{
-		ID:          id,
-		ContentType: contentType,
-		Content:     content,
+		ID:      id,
+		Topic:   topic,
+		Content: content,
 	}
 }

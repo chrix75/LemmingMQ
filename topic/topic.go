@@ -50,7 +50,7 @@ func (t *Topic) AddConsumer(f ConsumerCallback) {
 	t.consumers = append(t.consumers, f)
 }
 
-// SendMessage sends a message with the specified content type and content to the topic's consumers.
+// SendMessage sends a message with the specified content to the topic's consumers.
 // For BroadcastTopic, the message is sent to all consumers. For DispatchTopic, the message is sent to a single consumer.
 // It respects context cancellation and returns an error if the context is done or if any consumer fails to process the message.
 //
@@ -62,26 +62,26 @@ func (t *Topic) AddConsumer(f ConsumerCallback) {
 //		Diffusion: BroadcastTopic,
 //		Retries:   3,
 //	})
-//	
+//
 //	// Add consumers before sending messages
 //	topic.AddConsumer(func(ctx context.Context, msg Message) error {
 //		// Process the message
 //		return nil
 //	})
-//	
+//
 //	// Send a JSON message
-//	err := topic.SendMessage(ctx, "application/json", []byte(`{"message":"Hello World"}`))
+//	err := topic.SendMessage(ctx, []byte(`{"message":"Hello World"}`))
 //	if err != nil {
 //		// Handle error
 //	}
-func (t *Topic) SendMessage(ctx context.Context, contentType string, content []byte) error {
+func (t *Topic) SendMessage(ctx context.Context, content []byte) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
 		t.currentMessageID++
 
-		msg := NewMessage(t.currentMessageID, contentType, content)
+		msg := NewMessage(t.currentMessageID, t.Name, content)
 
 		if t.Diffusion == BroadcastTopic {
 			return t.sendMessageToAllConsumers(ctx, msg)
