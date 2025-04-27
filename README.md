@@ -205,6 +205,165 @@ func exampleContextCancellation() {
 }
 ```
 
+## Broker
+
+The Broker is a central component that manages multiple topics and provides a unified interface for sending messages and managing consumers.
+
+### Features
+
+- **Topic Management**: Create and manage multiple topics with different configurations
+- **Consumer Management**: Add and remove consumers to/from topics
+- **Asynchronous Message Processing**: Process messages in separate goroutines
+- **Configurable Queue Size**: Set the size of the internal message queue
+
+### Usage
+
+#### Creating a Broker
+
+```go
+package main
+
+import (
+    "LemmingMQ/lemmingmq"
+)
+
+func exampleCreateBroker() {
+    // Create a broker with a queue size of 100
+    broker := lemmingmq.NewBroker(lemmingmq.BrokerConfiguration{
+        QueueSize: 100,
+    })
+
+    // Start the broker to begin processing messages
+    broker.Start()
+}
+```
+
+#### Adding Topics to a Broker
+
+```go
+package main
+
+import (
+    "LemmingMQ/lemmingmq"
+    "LemmingMQ/topic"
+)
+
+func exampleAddTopicsToBroker() {
+    // Create a broker
+    broker := lemmingmq.NewBroker(lemmingmq.BrokerConfiguration{
+        QueueSize: 100,
+    })
+
+    // Add a broadcast topic
+    broker.AddTopic(topic.Configuration{
+        Name:      "notifications",
+        Diffusion: topic.BroadcastTopic,
+        Retries:   3,
+    })
+
+    // Add a dispatch topic
+    broker.AddTopic(topic.Configuration{
+        Name:      "tasks",
+        Diffusion: topic.DispatchTopic,
+        Retries:   2,
+    })
+
+    // Get a list of all topic names
+    topicNames := broker.Topics() // Returns ["notifications", "tasks"]
+}
+```
+
+#### Adding Consumers to Topics
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "github.com/chrix75/LemmingMQ/lemmingmq"
+    "github.com/chrix75/LemmingMQ/topic"
+)
+
+func exampleAddConsumersToBroker() {
+    // Create a broker with a topic
+    broker := lemmingmq.NewBroker(lemmingmq.BrokerConfiguration{
+        QueueSize: 100,
+    })
+
+    broker.AddTopic(topic.Configuration{
+        Name:      "notifications",
+        Diffusion: topic.BroadcastTopic,
+        Retries:   3,
+    })
+
+    // Add a callback consumer
+    broker.AddCallbackConsumer("notifications", func(ctx context.Context, msg topic.Message) error {
+        fmt.Printf("Received message: %s\n", string(msg.Content))
+        return nil
+    })
+
+    // Create a message handler
+    type LogHandler struct{}
+
+    func (h LogHandler) Handle(ctx context.Context, msg topic.Message) error {
+        fmt.Printf("Handler received message: %s\n", string(msg.Content))
+        return nil
+    }
+
+    // Add the handler as a consumer
+    handler := LogHandler{}
+    broker.AddHandlerConsumer("notifications", handler)
+
+    // Get the number of consumers for a topic
+    count := broker.ConsumerCount("notifications") // Returns 2
+
+    // Later, remove a handler if needed
+    broker.RemoveHandlerConsumer("notifications", handler)
+}
+```
+
+#### Sending Messages Through the Broker
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "github.com/chrix75/LemmingMQ/lemmingmq"
+    "github.com/chrix75/LemmingMQ/topic"
+)
+
+func exampleSendMessagesThroughBroker() {
+    // Create a broker with a topic and consumer
+    broker := lemmingmq.NewBroker(lemmingmq.BrokerConfiguration{
+        QueueSize: 100,
+    })
+
+    broker.AddTopic(topic.Configuration{
+        Name:      "notifications",
+        Diffusion: topic.BroadcastTopic,
+        Retries:   3,
+    })
+
+    broker.AddCallbackConsumer("notifications", func(ctx context.Context, msg topic.Message) error {
+        fmt.Printf("Received message: %s\n", string(msg.Content))
+        return nil
+    })
+
+    // Start the broker to begin processing messages
+    broker.Start()
+
+    // Send a message to the topic
+    ctx := context.Background()
+    err := broker.SendMessage(ctx, "notifications", []byte("Hello, world!"))
+    if err != nil {
+        fmt.Printf("Error sending message: %v\n", err)
+    }
+}
+```
+
 ## API Reference
 
 ### Types
