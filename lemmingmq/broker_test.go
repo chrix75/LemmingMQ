@@ -3,8 +3,11 @@ package lemmingmq
 import (
 	"LemmingMQ/topic"
 	"context"
+	"errors"
 	"github.com/stretchr/testify/assert"
+	"sync"
 	"testing"
+	"time"
 )
 
 var cfg = BrokerConfiguration{
@@ -24,14 +27,14 @@ func TestCreateBrokerWithOneTopic(t *testing.T) {
 	// given
 	broker := NewBroker(cfg)
 
-	cfg := topic.Configuration{
+	topicCfg := topic.Configuration{
 		Name:      "test",
 		Diffusion: topic.BroadcastTopic,
 		Retries:   0,
 	}
 
 	// when
-	broker.AddTopic(cfg)
+	broker.AddTopic(topicCfg)
 
 	// then
 	topics := broker.Topics()
@@ -42,13 +45,13 @@ func TestAddCallbackConsumer(t *testing.T) {
 	// given
 	broker := NewBroker(cfg)
 
-	cfg := topic.Configuration{
+	topicCfg := topic.Configuration{
 		Name:      "test",
 		Diffusion: topic.BroadcastTopic,
 		Retries:   0,
 	}
 
-	broker.AddTopic(cfg)
+	broker.AddTopic(topicCfg)
 
 	// when
 	broker.AddCallbackConsumer("test", func(ctx context.Context, message topic.Message) error {
@@ -71,13 +74,13 @@ func TestAddHandlerConsumer(t *testing.T) {
 	// given
 	broker := NewBroker(cfg)
 
-	cfg := topic.Configuration{
+	topicCfg := topic.Configuration{
 		Name:      "test",
 		Diffusion: topic.BroadcastTopic,
 		Retries:   0,
 	}
 
-	broker.AddTopic(cfg)
+	broker.AddTopic(topicCfg)
 
 	handler := noopHandler{}
 
@@ -110,4 +113,50 @@ func TestRemoveHandlerConsumer(t *testing.T) {
 	// then
 	count := broker.ConsumerCount("test")
 	assert.Equal(t, 0, count)
+}
+
+func TestFireAndForgetDispatchMessages(t *testing.T) {
+	// given
+	ctx := context.Background()
+
+	broker := NewBroker(cfg)
+	broker.Start()
+
+	topicCfg := topic.Configuration{
+		Name:      "test",
+		Diffusion: topic.DispatchTopic,
+		Retries:   0,
+	}
+
+	broker.AddTopic(topicCfg)
+
+	var receivedCount int
+	var mu sync.Mutex
+
+	callback := func(ctx context.Context, message topic.Message) error {
+		mu.Lock()
+		defer mu.Unlock()
+		receivedCount++
+		time.Sleep(1 * time.Second)
+		return nil
+	}
+
+	broker.AddCallbackConsumer("test", callback)
+
+	// when
+	content := []byte("hello world")
+
+	startTime := time.Now()
+	err1 := broker.SendMessage(ctx, "test", content)
+	err2 := broker.SendMessage(ctx, "test", content)
+	duration := time.Since(startTime)
+
+	err := errors.Join(err1, err2)
+
+	time.Sleep(time.Millisecond * 1500)
+
+	// then
+	assert.Nil(t, err)
+	assert.True(t, duration < 2*time.Second)
+	assert.Equal(t, 2, receivedCount)
 }
