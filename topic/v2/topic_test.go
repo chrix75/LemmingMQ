@@ -12,7 +12,7 @@ type LogConsumer[T any] struct {
 	messages []string
 }
 
-func (l *LogConsumer[T]) HandleMessage(message T) error {
+func (l *LogConsumer[T]) HandleMessage(message Message[T]) error {
 	msg := fmt.Sprintf("%v", message)
 	l.messages = append(l.messages, msg)
 	log.Println(msg)
