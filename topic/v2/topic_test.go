@@ -3,61 +3,86 @@ package v2
 import (
 	"fmt"
 	"github.com/stretchr/testify/assert"
-	"log"
 	"testing"
 	"time"
 )
 
-type LogConsumer[T any] struct {
-	messages []string
+type CountConsumer[T any] struct {
+	count int
 }
 
-func (l *LogConsumer[T]) HandleMessage(message Message[T]) error {
-	msg := fmt.Sprintf("%v", message)
-	l.messages = append(l.messages, msg)
-	log.Println(msg)
+type wiretapConsumer[T any] struct {
+	messages []Message[T]
+}
+
+func (w *wiretapConsumer[T]) HandleMessage(m Message[T]) error {
+	w.messages = append(w.messages, m)
+	return nil
+}
+
+func (w *wiretapConsumer[T]) extractMessageIDs() []int {
+	ids := make([]int, len(w.messages))
+	for i, m := range w.messages {
+		ids[i] = m.ID
+	}
+
+	return ids
+}
+
+func (l *CountConsumer[T]) HandleMessage(Message[T]) error {
+	l.count++
 	return nil
 }
 
 func TestCreateBroadcastTopic(t *testing.T) {
 	// given
 	tp := NewBroadcastTopic[string]()
-	c := &LogConsumer[string]{}
+	counter := &CountConsumer[string]{}
+	wiretap := &wiretapConsumer[string]{}
 
-	tp.AddConsumer(c)
+	tp.AddConsumer(counter)
+	tp.AddConsumer(wiretap)
 
 	// when
-	sentMessages := []string{}
-	for i := 1; i < 10; i++ {
+	var expectedMessages []Message[string]
+
+	for i := 1; i <= 2; i++ {
 		msg := fmt.Sprintf("Hello World %d", i)
 		tp.SendMessage(msg)
-		sentMessages = append(sentMessages, msg)
+		expectedMessages = append(expectedMessages, Message[string]{
+			ID:      i,
+			Content: msg,
+		})
 	}
 
 	// then
 	time.Sleep(1 * time.Second)
-	assert.Equal(t, sentMessages, c.messages)
+	assert.Equal(t, expectedMessages, wiretap.messages)
+	assert.Equal(t, len(expectedMessages), counter.count)
 }
 
 func TestBroadcastToManyConsumers(t *testing.T) {
 	// given
 	tp := NewBroadcastTopic[string]()
-	c1 := &LogConsumer[string]{}
-	c2 := &LogConsumer[string]{}
+	c1 := &wiretapConsumer[string]{}
+	c2 := &wiretapConsumer[string]{}
 
 	tp.AddConsumer(c1)
 	tp.AddConsumer(c2)
 
 	// when
-	sentMessages := []string{}
-	for i := 1; i < 10; i++ {
+	for i := 1; i <= 2; i++ {
 		msg := fmt.Sprintf("Hello World %d", i)
 		tp.SendMessage(msg)
-		sentMessages = append(sentMessages, msg)
 	}
 
 	// then
 	time.Sleep(1 * time.Second)
-	assert.Equal(t, sentMessages, c1.messages)
-	assert.Equal(t, sentMessages, c2.messages)
+
+	actualIDsForC1 := c1.extractMessageIDs()
+	actualIDsForC2 := c2.extractMessageIDs()
+
+	expectedIDs := []int{1, 2}
+	assert.Equal(t, expectedIDs, actualIDsForC1)
+	assert.Equal(t, expectedIDs, actualIDsForC2)
 }
