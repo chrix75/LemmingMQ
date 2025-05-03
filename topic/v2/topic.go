@@ -1,11 +1,14 @@
 package v2
 
-import "sync"
+import (
+	"sync"
+)
 
 type BroadcastTopic[T any] struct {
 	pool      *WorkerPool[T]
 	messageID int
 	mu        sync.Mutex
+	errChan   chan TopicError[T]
 }
 
 func (t *BroadcastTopic[T]) AddConsumer(c Consumer[T]) {
@@ -31,6 +34,7 @@ func (t *BroadcastTopic[T]) nextMessageID() int {
 type WorkerPool[T any] struct {
 	consumerChannels []chan Message[T]
 	mu               sync.Mutex
+	errCh            chan TopicError[T]
 }
 
 func (p *WorkerPool[T]) sendMessage(message Message[T]) {
@@ -45,7 +49,13 @@ func (p *WorkerPool[T]) startConsumer(ch chan Message[T], consumer Consumer[T]) 
 	p.consumerChannels = append(p.consumerChannels, ch)
 	go func() {
 		for message := range ch {
-			_ = consumer.HandleMessage(message)
+			err := consumer.HandleMessage(message)
+			if err != nil {
+				p.errCh <- TopicError[T]{
+					Message: message,
+					Err:     err,
+				}
+			}
 		}
 	}()
 }
@@ -54,14 +64,15 @@ type Consumer[T any] interface {
 	HandleMessage(Message[T]) error
 }
 
-func NewBroadcastTopic[T any]() *BroadcastTopic[T] {
+func NewBroadcastTopic[T any](errChan chan TopicError[T]) *BroadcastTopic[T] {
 	return &BroadcastTopic[T]{
-		pool: NewWorkerPool[T](),
+		pool: NewWorkerPool[T](errChan),
 	}
 }
 
-func NewWorkerPool[T any]() *WorkerPool[T] {
+func NewWorkerPool[T any](errCh chan TopicError[T]) *WorkerPool[T] {
 	return &WorkerPool[T]{
+		errCh:            errCh,
 		consumerChannels: make([]chan Message[T], 0),
 	}
 }

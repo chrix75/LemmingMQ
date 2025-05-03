@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"errors"
 	"fmt"
 	"github.com/stretchr/testify/assert"
 	"testing"
@@ -36,7 +37,8 @@ func (l *CountConsumer[T]) HandleMessage(Message[T]) error {
 
 func TestCreateBroadcastTopic(t *testing.T) {
 	// given
-	tp := NewBroadcastTopic[string]()
+	errChan := make(chan TopicError[string])
+	tp := NewBroadcastTopic[string](errChan)
 	counter := &CountConsumer[string]{}
 	wiretap := &wiretapConsumer[string]{}
 
@@ -63,7 +65,8 @@ func TestCreateBroadcastTopic(t *testing.T) {
 
 func TestBroadcastToManyConsumers(t *testing.T) {
 	// given
-	tp := NewBroadcastTopic[string]()
+	errChan := make(chan TopicError[string])
+	tp := NewBroadcastTopic[string](errChan)
 	c1 := &wiretapConsumer[string]{}
 	c2 := &wiretapConsumer[string]{}
 
@@ -85,4 +88,45 @@ func TestBroadcastToManyConsumers(t *testing.T) {
 	expectedIDs := []int{1, 2}
 	assert.Equal(t, expectedIDs, actualIDsForC1)
 	assert.Equal(t, expectedIDs, actualIDsForC2)
+}
+
+func TestManageError(t *testing.T) {
+	// given
+	errChan := make(chan TopicError[string])
+	tp := NewBroadcastTopic[string](errChan)
+	c1 := &consumerWithError[string]{}
+
+	tp.AddConsumer(c1)
+
+	var encounteredErrors []string
+	go func() {
+		for err := range errChan {
+			encounteredErrors = append(encounteredErrors, err.Error())
+		}
+	}()
+
+	// when
+	for i := 1; i <= 2; i++ {
+		msg := fmt.Sprintf("Hello World %d", i)
+		tp.SendMessage(msg)
+	}
+
+	// then
+	time.Sleep(1 * time.Second)
+	close(errChan)
+
+	expectedErrors := []string{fmt.Sprintf("1/error")}
+	assert.Equal(t, expectedErrors, encounteredErrors)
+}
+
+type consumerWithError[T any] struct {
+	messageCount int
+}
+
+func (c *consumerWithError[T]) HandleMessage(Message[T]) error {
+	c.messageCount++
+	if c.messageCount == 1 {
+		return errors.New("error")
+	}
+	return nil
 }
