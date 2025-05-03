@@ -1,427 +1,132 @@
 package topic
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"github.com/stretchr/testify/assert"
 	"testing"
+	"time"
 )
+
+type CountConsumer[T any] struct {
+	count int
+}
+
+type wiretapConsumer[T any] struct {
+	messages []Message[T]
+}
+
+func (w *wiretapConsumer[T]) HandleMessage(m Message[T]) error {
+	w.messages = append(w.messages, m)
+	return nil
+}
+
+func (w *wiretapConsumer[T]) extractMessageIDs() []int {
+	ids := make([]int, len(w.messages))
+	for i, m := range w.messages {
+		ids[i] = m.ID
+	}
+
+	return ids
+}
+
+func (l *CountConsumer[T]) HandleMessage(Message[T]) error {
+	l.count++
+	return nil
+}
 
 func TestCreateBroadcastTopic(t *testing.T) {
 	// given
-	topicName := "test"
-	topicDiffusion := BroadcastTopic
+	errChan := make(chan TopicError[string])
+	tp := NewBroadcastTopic[string](errChan)
+	counter := &CountConsumer[string]{}
+	wiretap := &wiretapConsumer[string]{}
+
+	tp.AddConsumer(counter)
+	tp.AddConsumer(wiretap)
 
 	// when
-	cfg := Configuration{
-		Name:      topicName,
-		Diffusion: topicDiffusion,
-		Retries:   0,
+	var expectedMessages []Message[string]
+
+	for i := 1; i <= 2; i++ {
+		msg := fmt.Sprintf("Hello World %d", i)
+		tp.SendMessage(msg)
+		expectedMessages = append(expectedMessages, Message[string]{
+			ID:      i,
+			Content: msg,
+		})
 	}
 
-	tp := NewTopic(cfg)
-
 	// then
-	expectedTopic := Topic{
-		Configuration: cfg,
+	time.Sleep(1 * time.Second)
+	assert.Equal(t, expectedMessages, wiretap.messages)
+	assert.Equal(t, len(expectedMessages), counter.count)
+}
+
+func TestBroadcastToManyConsumers(t *testing.T) {
+	// given
+	errChan := make(chan TopicError[string])
+	tp := NewBroadcastTopic[string](errChan)
+	c1 := &wiretapConsumer[string]{}
+	c2 := &wiretapConsumer[string]{}
+
+	tp.AddConsumer(c1)
+	tp.AddConsumer(c2)
+
+	// when
+	for i := 1; i <= 2; i++ {
+		msg := fmt.Sprintf("Hello World %d", i)
+		tp.SendMessage(msg)
 	}
 
-	assert.Equal(t, expectedTopic, *tp)
-	assert.Equal(t, 0, tp.ConsumerCount())
-}
-
-func TestCreateDispatcherTopic(t *testing.T) {
-	// given
-	topicName := "test"
-	topicDiffusion := DispatchTopic
-
-	// when
-	cfg := Configuration{
-		Name:      topicName,
-		Diffusion: topicDiffusion,
-		Retries:   0,
-	}
-
-	tp := NewTopic(cfg)
-
 	// then
-	expectedTopic := Topic{
-		Configuration: cfg,
-	}
+	time.Sleep(1 * time.Second)
 
-	assert.Equal(t, expectedTopic, *tp)
-	assert.Equal(t, 0, tp.ConsumerCount())
-}
+	actualIDsForC1 := c1.extractMessageIDs()
+	actualIDsForC2 := c2.extractMessageIDs()
 
-func TestAddOneConsumerToBroadcastTopic(t *testing.T) {
-	// given
-	tp := NewTopic(Configuration{
-		Name:      "test",
-		Diffusion: BroadcastTopic,
-		Retries:   0,
-	})
-
-	// when
-	tp.AddConsumer(func(c context.Context, msg Message) error {
-		return nil
-	})
-
-	// then
-	assert.Equal(t, 1, tp.ConsumerCount())
-}
-
-func TestRemoveHandlerConsumerFromTopic(t *testing.T) {
-	// given
-	tp := NewTopic(Configuration{
-		Name:      "test",
-		Diffusion: BroadcastTopic,
-		Retries:   0,
-	})
-
-	handler := noopHandler{}
-	tp.AddMessageHandler(handler)
-
-	// when
-	tp.RemoveMessageHandler(handler)
-
-	// then
-	assert.Equal(t, 0, tp.ConsumerCount())
-
-}
-
-func TestAddOneMessageHandlerToBroadcastTopic(t *testing.T) {
-	// given
-	tp := NewTopic(Configuration{
-		Name:      "test",
-		Diffusion: BroadcastTopic,
-		Retries:   0,
-	})
-
-	handler := noopHandler{}
-
-	// when
-	tp.AddMessageHandler(handler)
-
-	// then
-	assert.Equal(t, 1, tp.ConsumerCount())
-}
-
-type noopHandler struct{}
-
-func (h noopHandler) Handle(context.Context, Message) error {
-	return nil
-}
-
-func TestTopicBroadCastOneMessage(t *testing.T) {
-	// given
-	ctx := context.Background()
-
-	tp := NewTopic(Configuration{
-		Name:      "test",
-		Diffusion: BroadcastTopic,
-		Retries:   0,
-	})
-
-	var receivedContent string
-
-	tp.AddConsumer(func(ctx context.Context, msg Message) error {
-		if msg.Topic == "test" {
-			receivedContent = string(msg.Content)
-			return nil
-		}
-
-		return errors.New("could not encode message's content")
-	})
-
-	// when
-	content := "Hello World"
-	err := tp.SendMessage(ctx, []byte(content))
-
-	// then
-	assert.Nil(t, err)
-	assert.Equal(t, content, receivedContent)
-}
-
-func TestTopicBroadCastOneMessageByHandler(t *testing.T) {
-	// given
-	ctx := context.Background()
-
-	tp := NewTopic(Configuration{
-		Name:      "test",
-		Diffusion: BroadcastTopic,
-		Retries:   0,
-	})
-
-	handler := &stubHandler{}
-
-	tp.AddMessageHandler(handler)
-
-	// when
-	content := "Hello World"
-	err := tp.SendMessage(ctx, []byte(content))
-
-	// then
-	assert.Nil(t, err)
-	assert.Equal(t, []string{content}, handler.receivedContent)
-}
-
-func TestTopicDispatchOneMessageByHandler(t *testing.T) {
-	// given
-	ctx := context.Background()
-
-	tp := NewTopic(Configuration{
-		Name:      "test",
-		Diffusion: DispatchTopic,
-		Retries:   0,
-	})
-
-	handler := &stubHandler{}
-
-	tp.AddMessageHandler(handler)
-
-	// when
-	content := "Hello World"
-	err := tp.SendMessage(ctx, []byte(content))
-
-	// then
-	assert.Nil(t, err)
-	assert.Equal(t, []string{content}, handler.receivedContent)
-}
-
-type stubHandler struct {
-	receivedContent []string
-}
-
-func (h *stubHandler) Handle(_ context.Context, msg Message) error {
-	h.receivedContent = append(h.receivedContent, string(msg.Content))
-	return nil
-}
-
-func TestTopicBroadCastOneMessageToManySubscribers(t *testing.T) {
-	// given
-	ctx := context.Background()
-
-	tp := NewTopic(Configuration{
-		Name:      "test",
-		Diffusion: BroadcastTopic,
-		Retries:   0,
-	})
-
-	receivedContent := make([]string, 0)
-
-	consumerCallback := func(consumerID int) ConsumerCallback {
-		return func(ctx context.Context, msg Message) error {
-			if msg.Topic == "test" {
-				content := fmt.Sprintf("%d>%s", consumerID, msg.Content)
-				receivedContent = append(receivedContent, content)
-				return nil
-			}
-
-			return errors.New("could not encode message's content")
-		}
-	}
-
-	tp.AddConsumer(consumerCallback(1))
-	tp.AddConsumer(consumerCallback(2))
-
-	// when
-	content := "Hello World"
-	err := tp.SendMessage(ctx, []byte(content))
-
-	// then
-	assert.Nil(t, err)
-	expectedContent := []string{"1>Hello World", "2>Hello World"}
-	expectedIDs := []int{1, 1}
-	assert.Equal(t, expectedContent, receivedContent)
-	assert.Equal(t, expectedIDs, expectedIDs)
-}
-
-func TestTopicDispatchOneMessageToManySubscribers(t *testing.T) {
-	// given
-	ctx := context.Background()
-
-	tp := NewTopic(Configuration{
-		Name:      "test",
-		Diffusion: DispatchTopic,
-		Retries:   0,
-	})
-
-	receivedContent := make([]string, 0)
-	messageIDs := make([]int, 0)
-
-	consumerCallback := func(ctx context.Context, msg Message) error {
-		if msg.Topic == "test" {
-			receivedContent = append(receivedContent, string(msg.Content))
-			messageIDs = append(messageIDs, msg.ID)
-			return nil
-		}
-
-		return errors.New("could not encode message's content")
-	}
-
-	tp.AddConsumer(consumerCallback)
-	tp.AddConsumer(consumerCallback)
-
-	// when
-	content := "Hello World"
-	err := tp.SendMessage(ctx, []byte(content))
-
-	// then
-	assert.Nil(t, err)
-	expectedContent := []string{"Hello World"}
-	expectedIDs := []int{1}
-	assert.Equal(t, expectedContent, receivedContent)
-	assert.Equal(t, expectedIDs, messageIDs)
-}
-
-func TestTopicDispatchTwoMessagesToManySubscribers(t *testing.T) {
-	// given
-	ctx := context.Background()
-
-	tp := NewTopic(Configuration{
-		Name:      "test",
-		Diffusion: DispatchTopic,
-		Retries:   0,
-	})
-
-	receivedContent := make([]string, 0)
-	messageIDs := make([]int, 0)
-
-	consumerCallback := func(consumerID int) ConsumerCallback {
-		return func(ctx context.Context, msg Message) error {
-			if msg.Topic == "test" {
-				content := fmt.Sprintf("%d>%s", consumerID, msg.Content)
-				receivedContent = append(receivedContent, content)
-				messageIDs = append(messageIDs, msg.ID)
-				return nil
-			}
-
-			return errors.New("could not encode message's content")
-		}
-	}
-
-	tp.AddConsumer(consumerCallback(1))
-	tp.AddConsumer(consumerCallback(2))
-
-	// when
-	content := "Hello World"
-	err := tp.SendMessage(ctx, []byte(content))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = tp.SendMessage(ctx, []byte(content))
-
-	// then
-	assert.Nil(t, err)
-	expectedContent := []string{"1>Hello World", "2>Hello World"}
 	expectedIDs := []int{1, 2}
-
-	assert.Equal(t, expectedContent, receivedContent)
-	assert.Equal(t, expectedIDs, messageIDs)
+	assert.Equal(t, expectedIDs, actualIDsForC1)
+	assert.Equal(t, expectedIDs, actualIDsForC2)
 }
 
-func TestBroadcastWithRetry(t *testing.T) {
+func TestManageError(t *testing.T) {
 	// given
-	ctx := context.Background()
+	errChan := make(chan TopicError[string])
+	tp := NewBroadcastTopic[string](errChan)
+	c1 := &consumerWithError[string]{}
 
-	tp := NewTopic(Configuration{
-		Name:      "test",
-		Diffusion: BroadcastTopic,
-		Retries:   1,
-	})
+	tp.AddConsumer(c1)
 
-	receivedContent := make([]string, 0)
-	messageIDs := make([]int, 0)
-
-	consumerCallback := func(ctx context.Context, msg Message) error {
-		if msg.Topic == "test" {
-			receivedContent = append(receivedContent, string(msg.Content))
-			messageIDs = append(messageIDs, msg.ID)
-			return errors.New("simulated error")
+	var encounteredErrors []string
+	go func() {
+		for err := range errChan {
+			encounteredErrors = append(encounteredErrors, err.Error())
 		}
-
-		return errors.New("could not encode message's content")
-	}
-
-	tp.AddConsumer(consumerCallback)
+	}()
 
 	// when
-	content := "Hello World"
-	err := tp.SendMessage(ctx, []byte(content))
+	for i := 1; i <= 2; i++ {
+		msg := fmt.Sprintf("Hello World %d", i)
+		tp.SendMessage(msg)
+	}
 
 	// then
-	assert.NotNil(t, err)
-	expectedContent := []string{"Hello World", "Hello World"}
-	expectedIDs := []int{1, 1}
+	time.Sleep(1 * time.Second)
+	close(errChan)
 
-	assert.Equal(t, expectedContent, receivedContent)
-	assert.Equal(t, expectedIDs, messageIDs)
+	expectedErrors := []string{fmt.Sprintf("1/error")}
+	assert.Equal(t, expectedErrors, encounteredErrors)
 }
 
-func TestDispatchWithRetry(t *testing.T) {
-	// given
-	ctx := context.Background()
-
-	tp := NewTopic(Configuration{
-		Name:      "test",
-		Diffusion: DispatchTopic,
-		Retries:   1,
-	})
-
-	receivedContent := make([]string, 0)
-	messageIDs := make([]int, 0)
-
-	consumerCallback := func(ctx context.Context, msg Message) error {
-		if msg.Topic == "test" {
-			receivedContent = append(receivedContent, string(msg.Content))
-			messageIDs = append(messageIDs, msg.ID)
-			return errors.New("simulated error")
-		}
-
-		return errors.New("could not encode message's content")
-	}
-
-	tp.AddConsumer(consumerCallback)
-
-	// when
-	content := "Hello World"
-	err := tp.SendMessage(ctx, []byte(content))
-
-	// then
-	assert.NotNil(t, err)
-	expectedContent := []string{"Hello World", "Hello World"}
-	expectedIDs := []int{1, 1}
-
-	assert.Equal(t, expectedContent, receivedContent)
-	assert.Equal(t, expectedIDs, messageIDs)
+type consumerWithError[T any] struct {
+	messageCount int
 }
 
-func TestCancelMessageSending(t *testing.T) {
-	// given
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	tp := NewTopic(Configuration{
-		Name:      "test",
-		Diffusion: DispatchTopic,
-		Retries:   1,
-	})
-
-	consumerCallback := func(ctx context.Context, msg Message) error {
-		return nil
+func (c *consumerWithError[T]) HandleMessage(Message[T]) error {
+	c.messageCount++
+	if c.messageCount == 1 {
+		return errors.New("error")
 	}
-
-	tp.AddConsumer(consumerCallback)
-
-	// when
-	cancel()
-
-	content := "Hello World"
-	err := tp.SendMessage(ctx, []byte(content))
-
-	// then
-	assert.NotNil(t, err)
-	assert.Contains(t, err.Error(), "context canceled")
+	return nil
 }
