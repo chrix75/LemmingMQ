@@ -10,7 +10,8 @@ LemmingMQ is a lightweight, in-memory message queue library for Go applications.
 - **Retry Mechanism**: Configurable retry count for failed message deliveries
 - **Context Support**: Respects context cancellation for graceful shutdowns
 - **Minimal Dependencies**: Only depends on the Go standard library for core functionality
-- **Type-Safe API**: Strongly typed interfaces for reliable message handling
+- **Type-Safe API**: Fully generic interfaces for reliable message handling with any data type
+- **Error Handling**: Dedicated error channel for handling consumer errors
 
 ## Installation
 
@@ -26,26 +27,23 @@ go get github.com/chrix75/LemmingMQ
 package main
 
 import (
-    "context"
     "fmt"
     "github.com/chrix75/LemmingMQ/topic"
 )
 
 func exampleCreateTopics() {
-    // Create a broadcast topic (sends messages to all consumers)
-    broadcastTopic := topic.NewTopic(topic.Configuration{
-        Name:      "notifications",
-        Diffusion: topic.BroadcastTopic,
-        Retries:   3,
-    })
+    // Create an error channel to receive consumer errors
+    errChan := make(chan topic.TopicError[string])
 
-    // Create a dispatch topic (sends messages to one consumer at a time)
-    dispatchTopic := topic.NewTopic(topic.Configuration{
-        Name:      "tasks",
-        Diffusion: topic.DispatchTopic,
-        Retries:   2,
-    })
+    // Create a broadcast topic for string messages
+    broadcastTopic := topic.NewBroadcastTopic[string](errChan)
 
+    // Handle errors from consumers
+    go func() {
+        for err := range errChan {
+            fmt.Printf("Error processing message %d: %v\n", err.Message.ID, err.Err)
+        }
+    }()
 }
 ```
 
@@ -55,25 +53,29 @@ func exampleCreateTopics() {
 package main
 
 import (
-    "context"
     "fmt"
     "github.com/chrix75/LemmingMQ/topic"
 )
 
+// Define a consumer that implements the Consumer interface
+type LogConsumer struct{}
+
+func (c LogConsumer) HandleMessage(msg topic.Message[string]) error {
+    fmt.Printf("Received message: %s\n", msg.Content)
+    // Process the message
+    return nil
+}
+
 func exampleAddConsumer() {
-    // Create a topic
-    myTopic := topic.NewTopic(topic.Configuration{
-        Name:      "example",
-        Diffusion: topic.BroadcastTopic,
-        Retries:   1,
-    })
+    // Create an error channel
+    errChan := make(chan topic.TopicError[string])
+
+    // Create a topic for string messages
+    myTopic := topic.NewBroadcastTopic[string](errChan)
 
     // Add a consumer to process messages
-    myTopic.AddConsumer(func(ctx context.Context, msg topic.Message) error {
-        fmt.Printf("Received message: %s\n", string(msg.Content))
-        // Process the message
-        return nil
-    })
+    consumer := LogConsumer{}
+    myTopic.AddConsumer(consumer)
 }
 ```
 
@@ -83,334 +85,167 @@ func exampleAddConsumer() {
 package main
 
 import (
-    "context"
     "fmt"
     "github.com/chrix75/LemmingMQ/topic"
 )
 
 func exampleSendMessages() {
-    // Create a topic
-    myTopic := topic.NewTopic(topic.Configuration{
-        Name:      "example",
-        Diffusion: topic.BroadcastTopic,
-        Retries:   1,
-    })
+    // Create an error channel
+    errChan := make(chan topic.TopicError[string])
 
-    // Create a context
-    ctx := context.Background()
+    // Create a topic for string messages
+    myTopic := topic.NewBroadcastTopic[string](errChan)
+
+    // Add a consumer
+    myTopic.AddConsumer(&LogConsumer{})
 
     // Send a text message
-    err := myTopic.SendMessage(ctx, "text/plain", []byte("Hello, world!"))
-    if err != nil {
-        fmt.Println("Error sending message:", err)
-    }
+    myTopic.SendMessage("Hello, world!")
+
+    // Send another message
+    myTopic.SendMessage("Another message")
+
+    // Example with JSON data using a different generic type
+    jsonErrChan := make(chan topic.TopicError[[]byte])
+    jsonTopic := topic.NewBroadcastTopic[[]byte](jsonErrChan)
 
     // Send a JSON message
-    err = myTopic.SendMessage(ctx, "application/json", []byte(`{"greeting":"Hello, world!"}`))
-    if err != nil {
-        fmt.Println("Error sending message:", err)
-    }
+    jsonTopic.SendMessage([]byte(`{"greeting":"Hello, world!"}`))
 }
 ```
 
-### Handling Errors and Retries
+### Handling Errors
 
-LemmingMQ will automatically retry failed message deliveries based on the configured retry count:
+LemmingMQ provides an error channel to handle errors from consumers:
 
 ```go
 package main
 
 import (
-    "context"
     "errors"
     "fmt"
     "math/rand"
     "github.com/chrix75/LemmingMQ/topic"
 )
 
+// Consumer that sometimes fails
+type FlakyConsumer struct{}
+
+func (c FlakyConsumer) HandleMessage(msg topic.Message[string]) error {
+    // Simulate occasional failures
+    if rand.Intn(10) < 3 {
+        return errors.New("processing failed")
+    }
+
+    fmt.Printf("Processed message: %s\n", msg.Content)
+    return nil
+}
+
 func exampleErrorHandling() {
-    // Create a topic with 2 retries
-    myTopic := topic.NewTopic(topic.Configuration{
-        Name:      "example",
-        Diffusion: topic.BroadcastTopic,
-        Retries:   2,
-    })
+    // Create an error channel
+    errChan := make(chan topic.TopicError[string])
 
-    // Consumer that sometimes fails
-    myTopic.AddConsumer(func(ctx context.Context, msg topic.Message) error {
-        // Simulate occasional failures
-        if rand.Intn(10) < 3 {
-            return errors.New("processing failed")
-        }
-
-        fmt.Printf("Processed message: %s\n", string(msg.Content))
-        return nil
-    })
-
-    // With retries=2, the message will be attempted up to 3 times total
-    // (initial attempt + 2 retries)
-    ctx := context.Background()
-    err := myTopic.SendMessage(ctx, "text/plain", []byte("Hello, world!"))
-    if err != nil {
-        fmt.Println("Failed after all retries:", err)
-    }
-}
-```
-
-### Context Cancellation
-
-```go
-package main
-
-import (
-    "context"
-    "errors"
-    "fmt"
-    "time"
-    "github.com/chrix75/LemmingMQ/topic"
-)
-
-func exampleContextCancellation() {
     // Create a topic
-    myTopic := topic.NewTopic(topic.Configuration{
-        Name:      "example",
-        Diffusion: topic.BroadcastTopic,
-        Retries:   1,
-    })
+    myTopic := topic.NewBroadcastTopic[string](errChan)
 
-    // Create a context with timeout
-    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-    defer cancel()
+    // Add a consumer that sometimes fails
+    myTopic.AddConsumer(FlakyConsumer{})
 
-    // If context is cancelled before or during message processing,
-    // SendMessage will return the context error
-    err := myTopic.SendMessage(ctx, "text/plain", []byte("Hello, world!"))
-    if err != nil {
-        // Check for context cancellation
-        if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-            fmt.Println("Message sending was cancelled")
+    // Handle errors from the error channel
+    go func() {
+        for err := range errChan {
+            fmt.Printf("Error processing message %d: %v\n", err.Message.ID, err.Err)
+            // You can implement retry logic here if needed
         }
-    }
+    }()
 
-    // Example of manually cancelling the context
-    ctx2, cancel2 := context.WithCancel(context.Background())
-    // Cancel immediately for demonstration
-    cancel2()
-
-    // This will fail with context.Canceled error
-    err = myTopic.SendMessage(ctx2, "text/plain", []byte("This won't be sent"))
-    if err != nil {
-        fmt.Println("Error:", err)
-    }
+    // Send a message
+    myTopic.SendMessage("Hello, world!")
 }
 ```
 
-## Broker
+## Worker Pool
 
-The Broker is a central component that manages multiple topics and provides a unified interface for sending messages and managing consumers.
-
-### Features
-
-- **Topic Management**: Create and manage multiple topics with different configurations
-- **Consumer Management**: Add and remove consumers to/from topics
-- **Asynchronous Message Processing**: Process messages in separate goroutines
-- **Configurable Queue Size**: Set the size of the internal message queue
-
-### Usage
-
-#### Creating a Broker
+The topic package uses a worker pool to manage consumers and distribute messages:
 
 ```go
 package main
 
 import (
-    "LemmingMQ/lemmingmq"
-)
-
-func exampleCreateBroker() {
-    // Create a broker with a queue size of 100
-    broker := lemmingmq.NewBroker(lemmingmq.BrokerConfiguration{
-        QueueSize: 100,
-    })
-
-    // Start the broker to begin processing messages
-    broker.Start()
-}
-```
-
-#### Adding Topics to a Broker
-
-```go
-package main
-
-import (
-    "LemmingMQ/lemmingmq"
-    "LemmingMQ/topic"
-)
-
-func exampleAddTopicsToBroker() {
-    // Create a broker
-    broker := lemmingmq.NewBroker(lemmingmq.BrokerConfiguration{
-        QueueSize: 100,
-    })
-
-    // Add a broadcast topic
-    broker.AddTopic(topic.Configuration{
-        Name:      "notifications",
-        Diffusion: topic.BroadcastTopic,
-        Retries:   3,
-    })
-
-    // Add a dispatch topic
-    broker.AddTopic(topic.Configuration{
-        Name:      "tasks",
-        Diffusion: topic.DispatchTopic,
-        Retries:   2,
-    })
-
-    // Get a list of all topic names
-    topicNames := broker.Topics() // Returns ["notifications", "tasks"]
-}
-```
-
-#### Adding Consumers to Topics
-
-```go
-package main
-
-import (
-    "context"
     "fmt"
-    "github.com/chrix75/LemmingMQ/lemmingmq"
     "github.com/chrix75/LemmingMQ/topic"
 )
 
-func exampleAddConsumersToBroker() {
-    // Create a broker with a topic
-    broker := lemmingmq.NewBroker(lemmingmq.BrokerConfiguration{
-        QueueSize: 100,
-    })
+func exampleWorkerPool() {
+    // Create an error channel
+    errChan := make(chan topic.TopicError[string])
 
-    broker.AddTopic(topic.Configuration{
-        Name:      "notifications",
-        Diffusion: topic.BroadcastTopic,
-        Retries:   3,
-    })
+    // Create a worker pool
+    pool := topic.NewWorkerPool[string](errChan)
 
-    // Add a callback consumer
-    broker.AddCallbackConsumer("notifications", func(ctx context.Context, msg topic.Message) error {
-        fmt.Printf("Received message: %s\n", string(msg.Content))
-        return nil
-    })
+    // Create a consumer
+    consumer := LogConsumer{}
 
-    // Create a message handler
-    type LogHandler struct{}
+    // Create a channel for the consumer
+    consumerCh := make(chan topic.Message[string])
 
-    func (h LogHandler) Handle(ctx context.Context, msg topic.Message) error {
-        fmt.Printf("Handler received message: %s\n", string(msg.Content))
-        return nil
+    // Start the consumer in the worker pool
+    pool.startConsumer(consumerCh, consumer)
+
+    // Send a message to all consumers
+    message := topic.Message[string]{
+        ID:      1,
+        Content: "Hello, world!",
     }
-
-    // Add the handler as a consumer
-    handler := LogHandler{}
-    broker.AddHandlerConsumer("notifications", handler)
-
-    // Get the number of consumers for a topic
-    count := broker.ConsumerCount("notifications") // Returns 2
-
-    // Later, remove a handler if needed
-    broker.RemoveHandlerConsumer("notifications", handler)
+    pool.sendMessage(message)
 }
 ```
 
-#### Sending Messages Through the Broker
-
-```go
-package main
-
-import (
-    "context"
-    "fmt"
-    "github.com/chrix75/LemmingMQ/lemmingmq"
-    "github.com/chrix75/LemmingMQ/topic"
-)
-
-func exampleSendMessagesThroughBroker() {
-    // Create a broker with a topic and consumer
-    broker := lemmingmq.NewBroker(lemmingmq.BrokerConfiguration{
-        QueueSize: 100,
-    })
-
-    broker.AddTopic(topic.Configuration{
-        Name:      "notifications",
-        Diffusion: topic.BroadcastTopic,
-        Retries:   3,
-    })
-
-    broker.AddCallbackConsumer("notifications", func(ctx context.Context, msg topic.Message) error {
-        fmt.Printf("Received message: %s\n", string(msg.Content))
-        return nil
-    })
-
-    // Start the broker to begin processing messages
-    broker.Start()
-
-    // Send a message to the topic
-    ctx := context.Background()
-    err := broker.SendMessage(ctx, "notifications", []byte("Hello, world!"))
-    if err != nil {
-        fmt.Printf("Error sending message: %v\n", err)
-    }
-}
-```
 
 ## API Reference
 
 ### Types
 
-#### `topic.DiffusionType`
+#### `topic.Message[T]`
 
-Enum defining how messages are distributed to consumers:
-- `topic.BroadcastTopic`: Sends messages to all consumers
-- `topic.DispatchTopic`: Sends messages to one consumer at a time (round-robin)
-
-#### `topic.Configuration`
-
-Configuration for creating a new topic:
-- `Name`: String identifier for the topic
-- `Diffusion`: The diffusion type (broadcast or dispatch)
-- `Retries`: Number of retry attempts for failed message deliveries
-
-#### `topic.Message`
-
-Structure representing a message:
+Generic structure representing a message:
 - `ID`: Unique identifier for the message
-- `Topic`: The name of the topic 
-- `Content`: Byte slice containing the message data
+- `Content`: Content of the message with type T
+
+#### `topic.TopicError[T]`
+
+Generic structure representing an error from a consumer:
+- `Message`: The message that caused the error
+- `Err`: The error that occurred
+
+#### `topic.Consumer[T]`
+
+Interface for message consumers:
+- `HandleMessage(Message[T]) error`: Method to handle a message
 
 ### Functions
 
-#### `topic.NewTopic(cfg Configuration) *Topic`
+#### `topic.NewBroadcastTopic[T](errChan chan TopicError[T]) *BroadcastTopic[T]`
 
-Creates a new topic with the specified configuration.
+Creates a new broadcast topic with the specified error channel.
 
-#### `topic.NewMessage(id int, topic string, content []byte) Message`
+#### `topic.NewWorkerPool[T](errCh chan TopicError[T]) *WorkerPool[T]`
 
-Creates a new message with the specified ID, topic name, and content.
+Creates a new worker pool with the specified error channel.
 
 ### Methods
 
-#### `(t *Topic) AddConsumer(f ConsumerCallback)`
+#### `(t *BroadcastTopic[T]) AddConsumer(c Consumer[T])`
 
-Registers a new consumer callback function to the topic.
+Registers a new consumer to the topic.
 
-#### `(t *Topic) SendMessage(ctx context.Context, content []byte) error`
+#### `(t *BroadcastTopic[T]) SendMessage(content T)`
 
 Sends a message with the specified content to the topic's consumers.
 
-#### `(t *Topic) ConsumerCount() int`
+#### `(t *BroadcastTopic[T]) nextMessageID() int`
 
-Returns the number of consumers registered to the topic.
+Generates the next message ID for the topic.
 
 ## License
 
