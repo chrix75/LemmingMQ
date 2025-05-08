@@ -20,7 +20,7 @@ func TestCreateDispatchTopic(t *testing.T) {
 	// when
 	var expectedMessages []Message[string]
 
-	for i := 1; i <= 50; i++ {
+	for i := 1; i <= 500; i++ {
 		msg := fmt.Sprintf("Hello World %d", i)
 		tp.SendMessage(msg)
 		expectedMessages = append(expectedMessages, Message[string]{
